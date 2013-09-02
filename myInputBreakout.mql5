@@ -1,0 +1,167 @@
+//+------------------------------------------------------------------+
+//|                                                        MABOL.mq5 |
+//|                        Copyright 2010, MetaQuotes Software Corp. |
+//|                                              http://www.mql5.com |
+//+------------------------------------------------------------------+
+#property copyright "Copyright 2010, MetaQuotes Software Corp."
+#property link      "http://www.mql5.com"
+#property version   "1.00"
+
+#include <ExpertAdvisorECN.mqh>
+
+input double highPrice  = 0.0; //High Breakout Price;
+input double lowPrice   = 0.0; //Low Breakout Price;
+input int    SL         =  50; // Stop Loss distance
+input int    TP         = 100; // Take Profit distance
+input int    TS         =  50; // Trailing Stop distance
+input double Risk       = 0.1; // Risk
+input int    maxLong    = 1;
+input int    maxShort   = 1;
+
+//---
+class CMyEA : public CExpertAdvisor
+  {
+protected:
+   double            m_risk;          // size of risk
+   int               m_sl;            // Stop Loss
+   int               m_tp;            // Take Profit
+   int               m_ts;            // Trailing Stop
+   double            m_highPrice;
+   double            m_lowPrice;
+   int               m_maxLong;
+   int               m_maxShort;
+   int               m_long;
+   int               m_short;
+public:
+   void              CMyEA();
+   void             ~CMyEA();
+   virtual bool      Init(string smb,ENUM_TIMEFRAMES tf); // initialization
+   virtual bool      Main();                              // main function
+   virtual void      OpenPosition(long dir);              // open position on signal
+   virtual void      ClosePosition(long dir);             // close position on signal
+   virtual long      CheckSignal(bool bEntry);            // check signal
+  };
+
+//------------------------------------------------------------------	CMyEA
+void CMyEA::CMyEA() { }
+
+//------------------------------------------------------------------	~CMyEA
+void CMyEA::~CMyEA()
+{ }
+
+//------------------------------------------------------------------	Init
+bool CMyEA::Init(string smb,ENUM_TIMEFRAMES tf)
+{
+   if(!CExpertAdvisor::Init(0,smb,tf)) return(false);                                // initialize parent class
+
+   // copy parameters
+   m_risk=Risk; 
+   m_tp=TP; 
+   m_sl=SL; 
+   m_ts=TS;                                           
+   m_highPrice=highPrice;
+   m_lowPrice=lowPrice;
+   m_maxLong=maxLong;
+   m_maxShort=maxShort;
+   m_long=0;
+   m_short=0;
+   
+   m_bInit=true; 
+   return(true);                                                                     // trade allowed
+}
+
+//------------------------------------------------------------------	Main
+bool CMyEA::Main() // main function
+{
+   if(!CExpertAdvisor::Main()) return(false); // call function of parent class
+   if(Bars(m_smb,m_tf)<=100) return(false);   // if there are insufficient number of bars
+   if(!CheckNewBar()) return(true);           // check new bar
+                                              
+   long dir;                                  // check each direction  
+   dir=ORDER_TYPE_BUY;
+   OpenPosition(dir); ClosePosition(dir); TrailingPosition(dir,m_ts);
+   dir=ORDER_TYPE_SELL;
+   OpenPosition(dir); ClosePosition(dir); TrailingPosition(dir,m_ts);
+
+   return(true);
+}
+
+//------------------------------------------------------------------	OpenPos
+void CMyEA::OpenPosition(long dir)
+{
+// if there is an order, then exit
+   if(PositionSelect(m_smb)) return;
+// if there is no signal for current direction
+   if(dir!=CheckSignal(true)) return;
+   
+   if(dir==ORDER_TYPE_BUY)
+      m_long += 1;
+   else
+      m_short +=1;
+      
+   double lot=CountLotByRisk(m_sl,m_risk,0);
+// if lot is not defined
+   if(lot<=0) return;
+// open position
+   DealOpen(dir,lot,m_sl,m_tp);
+}
+
+
+//------------------------------------------------------------------	ClosePos
+void CMyEA::ClosePosition(long dir)
+{
+// if there is no position, then exit
+   if(!PositionSelect(m_smb)) return;
+// if position of unchecked direction
+   if(dir!=PositionGetInteger(POSITION_TYPE)) return;
+// if the close signal didn't match the current position
+   if(dir!=CheckSignal(false)) return;
+// close position
+   m_trade.PositionClose(m_smb,1);
+}
+
+//------------------------------------------------------------------	CheckSignal
+long CMyEA::CheckSignal(bool bEntry)
+{  
+   MqlRates rt[3];   // Array of price values of last 3 bars
+   
+   if(CopyRates(m_smb,m_tf,0,3,rt)!=3) // Copy price values of last 3 bars to array
+     { Print("CopyRates ",m_smb," history is not loaded"); return(WRONG_VALUE); }
+     
+   Print("m_long: " + m_long);
+   Print("m_short: " + m_long);
+   
+   //Buy if the price close above the maxLong Price
+   if(rt[1].close>m_highPrice && m_long <= m_maxLong)
+      return(bEntry ? ORDER_TYPE_BUY:ORDER_TYPE_SELL); // condition for buy
+   
+   
+   //Sell if the price close below the maxShort Price
+   if(rt[1].open<m_lowPrice && m_short <= m_maxShort)
+      return(bEntry ? ORDER_TYPE_SELL:ORDER_TYPE_BUY); // condition for sell
+
+   return(WRONG_VALUE); // if there is no signal
+}
+
+CMyEA ea; // class instance
+
+//------------------------------------------------------------------	OnInit
+int OnInit()
+{
+   ea.Init(Symbol(),Period()); // initialize expert
+
+                                 // initialization example
+// ea.Init(Symbol(), PERIOD_M5); // for fixed timeframe
+// ea.Init("USDJPY", PERIOD_H2); // for fixed symbol and timeframe
+
+   return(0);
+}
+
+//------------------------------------------------------------------	OnDeinit
+void OnDeinit(const int reason) { }
+//------------------------------------------------------------------	OnTick
+void OnTick()
+  {
+   ea.Main(); // process incoming tick
+  }
+//+------------------------------------------------------------------+1.5488
