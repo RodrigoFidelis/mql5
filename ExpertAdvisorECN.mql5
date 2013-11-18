@@ -185,10 +185,10 @@ double CExpertAdvisor::CountLotByRisk(int dist,double risk,double lot) // calcul
 //------------------------------------------------------------------	DealOpen
 ulong CExpertAdvisor::DealOpen(long dir,double lot,int SL,int TP)
   {
-   Print("dir: " + dir);
-   Print("lot: " + lot);
-   Print("m_sl: " + SL);
-   Print("m_tp: " + TP);
+   //Print("dir: " + dir);
+   //Print("lot: " + lot);
+   //Print("m_sl: " + SL);
+   //Print("m_tp: " + TP);
    double op,sl,tp,apr,StopLvl;
 // determine price parameters
    m_smbinf.RefreshRates(); m_smbinf.Refresh();
@@ -197,13 +197,13 @@ ulong CExpertAdvisor::DealOpen(long dir,double lot,int SL,int TP)
    sl=NormalSL(dir, op, apr, SL, StopLvl);         // Stop Loss
    tp=NormalTP(dir, op, apr, TP, StopLvl);         // Take Profit
 
-   Print("dir: " + dir);
-   Print("op: " + op);
-   Print("apr: " + apr);
-   Print("lot: " + lot);
-   Print("m_sl: " + sl);
-   Print("StopLvl: " + StopLvl);
-   Print("m_tp: " + tp);
+   //Print("dir: " + dir);
+   //Print("op: " + op);
+   //Print("apr: " + apr);
+   //Print("lot: " + lot);
+   //Print("m_sl: " + sl);
+   //Print("StopLvl: " + StopLvl);
+   //Print("m_tp: " + tp);
 
                                                    // open position
    m_trade.PositionOpen(m_smb,(ENUM_ORDER_TYPE)dir,lot,op,0,0);
@@ -215,7 +215,17 @@ ulong CExpertAdvisor::DealOpen(long dir,double lot,int SL,int TP)
    
    Sleep(500);
    
-   m_trade.PositionModify(m_smb, sl, tp);
+   
+   //I want to check if it added the stop, if either cancel the order of modify the stops until it succeeds.
+   if(!m_trade.PositionModify(m_smb, sl, tp))
+   {
+      m_trade.OrderDelete(order);
+      //if(m_trade.ResultRetcodeDescription() == "invalid stops")
+      Print("FFFFFFFAAAAAAAIIIIIIIILLLLLLLLL :: " + m_trade.ResultRetcodeDescription());
+   }
+
+
+
    return(GetDealByOrder(order));                  // return deal ticket
   }
   
