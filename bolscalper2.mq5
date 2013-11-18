@@ -27,21 +27,24 @@ input int    OBBPer     =  21;      // Outer Bollinger Bands period
 input double OBBDev     =  2;       // Outer Bollinger Bands deviation
 input int    IBBPer     =  21;      // Inner Bollinger Bands period
 input double IBBDev     =  3;       // Inner Bollinger Bands deviation
+input int    ATRPer     =  14;
 
 //---
 class CMyEA : public CExpertAdvisor
   {
 protected:
    double            m_risk;           // size of risk
-   double               m_sl;             // Stop Loss
-   int               m_tp;             // Take Profit
+   int               m_sl;             // Stop Loss
+   double               m_tp;             // Take Profit
    //int               m_ts;           // Trailing Stop  
    int               m_OBBPer;         // Outer Bollinger Bands p1eriod     
    double            m_OBBDev;         // Outer Bollinger Bands deviation 
    int               m_hObb;           // Outer Bollinger Bands indicator handle     
    int               m_IBBPer;         // Inner Bollinger Bands p1eriod     
    double            m_IBBDev;         // Inner Bollinger Bands deviation 
-   int               m_h_Ibb;           // Inner Bollinger Bands indicator handle     
+   int               m_h_Ibb;          // Inner Bollinger Bands indicator handle     
+   int               m_hATR;           // ATR handle
+   int               m_ATRPer;         // ATR Period 
    int               m_MAPer;          // MA Period
    int               m_hMA;            // MA handle
 public:
@@ -64,6 +67,7 @@ void CMyEA::~CMyEA()
    IndicatorRelease(m_hMA);   // delete indicators
    IndicatorRelease(m_hObb);
    IndicatorRelease(m_h_Ibb);
+   IndicatorRelease(m_hATR);
    
 }
 
@@ -78,6 +82,7 @@ bool CMyEA::Init(string smb,ENUM_TIMEFRAMES tf)
    m_IBBPer = IBBPer; 
    m_IBBDev = IBBDev;
    m_MAPer  = MAper;
+   m_ATRPer = ATRPer;
    m_risk   = Risk;
    ////////////HARD CODED///////////////
    m_h_Ibb=iBands(m_smb,m_tf,21,0,2,PRICE_CLOSE); 
@@ -85,6 +90,7 @@ bool CMyEA::Init(string smb,ENUM_TIMEFRAMES tf)
    //m_hObb=iCustom(m_smb,m_tf,"myBB",21,0,3,PRICE_CLOSE); 
    /////////////////////////////////////
    m_hMA=iMA(m_smb,m_tf, m_MAPer, 0, MODE_EMA ,PRICE_CLOSE);
+   m_hATR=iATR(m_smb,m_tf, m_ATRPer);
 
                                   
    m_bInit=true; 
@@ -125,6 +131,8 @@ void CMyEA::OpenPosition(long dir)
    
 // if lot is not defined
    if(lot<=0) return;
+   
+   if (m_sl <= 10) return;
 // open position
    DealOpen(dir,lot,m_sl,m_tp);
 }
@@ -149,12 +157,13 @@ long CMyEA::CheckSignal(bool bEntry)
 {
   
    double ma[3],
+          atr[3],
           O_bbup[3],   // Array of Bollinger Bands' upper border values
           O_bbdn[3],   // Array of Bollinger Bands' lower border values
           I_bbup[3],   // Array of Bollinger Bands' upper border values
           I_bbdn[3],   // Array of Bollinger Bands' lower border values
-          I_bbmid[3];  // Array of Bollinger Bands' lower border values
-   
+          I_bbmid[3]; // Array of Bollinger Bands' lower border values
+            
    MqlRates rt[4];   // Array of price values of last 3 bars
    
    if(CopyRates(m_smb, m_tf,0,4,rt)!=4) // Copy price values of last 3 bars to array
@@ -166,7 +175,7 @@ long CMyEA::CheckSignal(bool bEntry)
    // Array values:  -- rt[0].close) -- Oldest Bar and rt.3.close is the cusrrent Bar
    if(CopyBuffer(m_hObb,1,0,3,O_bbup)<3 || CopyBuffer(m_hObb,2,0,3,O_bbdn)<3 || CopyBuffer(m_h_Ibb,1,0,3,I_bbup)<3
       || CopyBuffer(m_h_Ibb,0,0,3,I_bbmid)<3 || CopyBuffer(m_hObb,2,0,3,O_bbdn)<3  || CopyBuffer(m_hMA,0,0,3,ma)<3
-      || CopyBuffer(m_h_Ibb,2,0,3,I_bbdn)<3)
+      || CopyBuffer(m_hATR,0,0,3,atr)<3 ||  CopyBuffer(m_h_Ibb,2,0,3,I_bbdn)<3)
    { 
       Print("CopyBuffer - no data"); 
       return(WRONG_VALUE); 
@@ -179,7 +188,7 @@ long CMyEA::CheckSignal(bool bEntry)
     //Print("O_bbup[0]: " + O_bbup[0]);
     //Print("ma1: " + ma[1]);
    
-   //Buy if price closes below the inner lower band but is inside the outer and the nex candle is a reverse candle 
+   //BUY -- if price closes below the inner lower band but is inside the outer and the nex candle is a reverse candle 
    //and in same direction as the MA or trend.
    if(rt[1].close<I_bbdn[0] && 
       rt[1].close>O_bbdn[0] && 
@@ -188,26 +197,34 @@ long CMyEA::CheckSignal(bool bEntry)
       )
    {
       //m_sl = 15;
-      m_tp = 30;
-      double sl = getSL(true); //Gets the higesth high\low of the last 4 candles to use that price as a stop
+      //m_tp = 30;
+      double sl = getSL(false); //Gets the higesth high\low of the last 4 candles to use that price as a stop
+      m_smbinf.RefreshRates(); m_smbinf.Refresh();
       double StopLvl=m_smbinf.StopsLevel()*m_smbinf.Point(); // remember stop level
-      //m_sl = ((sl + rt[3].open) + StopLvl) * m_smbinf.Point();  //Problem is that it's 0.00018 is not an int neither is stop level
-      //m_sl = sl + rt[3].open / 100000;
-      m_sl = NormalizeDouble(sl + rt[3].open,5) *10000; 
+      //StopLvl=m_smbinf.StopsLevel()*m_smbinf.Point(); // remember stop level
+     
+      //Might just add a stop check that if its too small there's not point really as it will hit the stop and then
+      //you've just wasted 2 - 5% of your account.
+      //sl needs to be smaller 
+      
+      //m_sl = NormalizeDouble(sl + rt[3].open,5) *10000; 
+      m_sl = NormalizeDouble(rt[3].open - sl,5) *10000; 
 
       Print("BUY==========================");
-      Print("sl: " + (string)sl);
-      Print("m_sl: "+ (string)m_sl);
+      Print("sl: " + sl);
+      Print("m_sl: "+ m_sl);
       Print("rt[3].open: " +  rt[3].open);
-      Print("Stoplvl: " + (string)StopLvl);
-      Print("==========================");
+      Print("Stoplvl: " + StopLvl);
+      //Print("==========================");
       
 
-      //m_tp = (I_bbmid[1] - rt[2].close) / 0.0001;
-      //Print("m_tp: " + m_tp);
+      m_tp = NormalizeDouble((I_bbmid[1] - rt[2].close),5) / 0.0001;
+      Print("m_tp: " + m_tp);
       //Print("I_bbmid[1] : " + I_bbmid[1]);
       //Print("rt[2].close : " + rt[2].close);
       //|| rt[3].close == I_bbmid[1]
+      Print("ATR: " + NormalizeDouble(atr[2],5) *10000);
+      Print("BUY=======================");
       return(bEntry ? ORDER_TYPE_BUY:ORDER_TYPE_SELL); // condition for buy   
    }
  
@@ -223,27 +240,29 @@ long CMyEA::CheckSignal(bool bEntry)
    {
       
       //m_sl = 30;
-      m_tp = 30;
+      //m_tp = 30;
       
       double sl = getSL(true);   //Gets the lowest low of the last 4 candles to use that price as a stop
-      double StopLvl=m_smbinf.StopsLevel()*m_smbinf.Point(); // remember stop level
-      //m_sl = ((sl - rt[3].open) + StopLvl) * m_smbinf.Point();   
+      m_smbinf.RefreshRates(); m_smbinf.Refresh();
+      double StopLvl=m_smbinf.StopsLevel()*m_smbinf.Point(); // remember stop level 
       m_sl = NormalizeDouble(sl - rt[3].open,5) *10000; 
+      
+      
       Print("SELL==========================");
-      Print("rt3: " + rt[3].open);
-      Print("Stoplvl: " + (string)StopLvl);
-      Print("sl: " + NormalizeDouble(sl,5));
+      ////Print("rt3: " + rt[3].open);
+      Print("Stoplvl: " + StopLvl);
+      //Print("sl: " + NormalizeDouble(sl,5));
       Print("m_sl: "+ m_sl);
-      Print("==========================");
-      
-      
-      //m_sl = (rt[1].high - rt[3].open)
+      //Print("==============================");
+            
       //m_tp = (rt[2].close - I_bbmid[1]) / 0.0001;
+      m_tp = NormalizeDouble((rt[2].close - I_bbmid[1]),5) * 10000;
       //Print("==========================");
-      //Print("m_tp: " + m_tp);
+      Print("m_tp: " + m_tp);
       //Print("I_bbmid[1] : " + I_bbmid[1]);
       //Print("rt[2].close : " + rt[2].close);
-      //Print("==========================");
+      Print("ATR: " + NormalizeDouble(atr[2],5) *10000);
+      Print("SELL========================");
       
       //|| rt[1].close > I_bbmid[1]
       return(bEntry ? ORDER_TYPE_SELL:ORDER_TYPE_BUY); // condition for selll
@@ -267,7 +286,7 @@ double CMyEA::getSL(bool dir)
       Print("CopyRates ",m_smb," history is not loaded"); return(WRONG_VALUE); 
    }
    
-   if(dir)
+   if(dir)  //true == SELL
    {
       //THis will work for sell but not buy    
       sl = rt[0].high;
@@ -281,17 +300,17 @@ double CMyEA::getSL(bool dir)
          }
       }
    }
-   else
+   else  //false == BUY
    {
       //For buy you would need the low
       sl = rt[0].low;
-      for(int i=0; 1<4; i++)
+      for(int j = 0; j <4; j++)
       {
-         //Print("rt[i].low:: " + i + " :: " + rt[i].low);  
+         Print("rt[j].low:: " + j + " :: " + rt[j].low);  
                
-         if(rt[i].low < sl)
+         if(rt[j].low < sl)
          {
-            sl = rt[i].low;
+            sl = rt[j].low;
          }
       }
    }
